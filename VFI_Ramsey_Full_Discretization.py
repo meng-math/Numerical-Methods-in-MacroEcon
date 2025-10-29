@@ -8,7 +8,7 @@ import numpy as np
 beta = 0.99
 alpha = 0.3
 tol = 1e-9
-n = 2000
+n = 2000 # number of grid points, or choose n = 500 for problem 1
 
 
 # === full discretiazation ===
@@ -40,25 +40,49 @@ while error > tol:
     
     V = V_new.copy()
 
-    for i, k in enumerate(grid):
+    # k as column, kp as row -> shape (n, n)
+    k_col = grid[:, None]                # shape (n,1)
+    kp_row = grid[None, :]               # shape (1,n)
 
-        best = -np.inf
+    # consumption matrix: c[i,j] = k_i^alpha - kp_j
+    cons = k_col**alpha - kp_row        # shape (n,n)
 
-        for j, kp in enumerate(grid):
+    # utility matrix; infeasible consumption -> BIG_NEG
+    util_mat = np.where(cons > 0, np.log(cons), BIG_NEG)  # shape (n,n)
 
-            c = k ** alpha - kp
-            val = utility(c) + beta * V[j]
-            
+    # value matrix: u(c) + beta * V(kp)
+    val_mat = util_mat + beta * V[None, :]  # broadcast V over rows
 
-            if val > best:
-                best = val
-                best_idx = kp
-                
-
-        V_new[i] = best
-        g_num[i] = best_idx
+    # for each k (each row) pick best kp (max over columns)
+    best_idx = np.argmax(val_mat, axis=1)          # shape (n,)
+    V_new = val_mat[np.arange(n), best_idx]        # max values, shape (n,)
+    g_num = grid[best_idx]                         # chosen kp values
 
     error = np.max(np.abs(V_new - V)) / (1.0 + np.max(np.abs(V)))
+
+# while error > tol:
+    
+#     V = V_new.copy()
+
+#     for i, k in enumerate(grid):
+
+#         best = -np.inf
+
+#         for j, kp in enumerate(grid):
+
+#             c = k ** alpha - kp
+#             val = utility(c) + beta * V[j]
+            
+
+#             if val > best:
+#                 best = val
+#                 best_idx = kp
+                
+
+#         V_new[i] = best
+#         g_num[i] = best_idx
+
+#     error = np.max(np.abs(V_new - V)) / (1.0 + np.max(np.abs(V)))
 
 end_time = time.time()
 
