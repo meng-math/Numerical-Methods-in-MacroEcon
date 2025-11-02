@@ -6,8 +6,6 @@ import numpy as np
 import time
 import matplotlib.pyplot as plt
 
-'''VFI with Full Discretization to solve the Ramsey Model '''
-
 
 # === parameters setting ===
 
