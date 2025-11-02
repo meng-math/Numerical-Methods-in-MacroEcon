@@ -69,33 +69,12 @@ while flag:
 
     for i, k_val in enumerate(grid):
         F = lambda x: euler_residual(k_val, x, k_old)   # use F consistently
-        left, right = k_min, k_max
-        f_left, f_right = F(left), F(right)
 
-        if f_left * f_right <= 0:
-            try:
-                sol = root_scalar(F, bracket=[left, right], method='bisect')
-                k_new[i] = sol.root
-            except ValueError:
-                # rare: numerical issues at endpoints -> fallback
-                k_new[i] = k_policy_analytical(k_val)
-        else:
-            # scan interval for a sub-bracket with a sign change
-            xs = np.linspace(left, right, 200)
-            found = False
-            for x0, x1 in zip(xs[:-1], xs[1:]):
-                if F(x0) * F(x1) <= 0:
-                    try:
-                        sol = root_scalar(F, bracket=[x0, x1], method='bisect')
-                        k_new[i] = sol.root
-                        found = True
-                        break
-                    except ValueError:
-                        # if bisect fails here, continue scanning
-                        pass
-            if not found:
-                # no sign change found — use analytical policy as safe fallback
-                k_new[i] = k_policy_analytical(k_val)
+        eps = 1e-12
+        left, right = k_min, min(k_max, f(k_val) - eps)
+        sol = root_scalar(F, bracket=[left, right], method='bisect')
+        k_new[i] = sol.root
+
     err = np.max(np.abs(k_new - k_old)) / np.max(np.abs(k_old))
     print(f'Current error: {err:.2e}')
     flag = bool(err > tol)
