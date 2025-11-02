@@ -29,8 +29,24 @@ BIG_NEG = -1e16
 
 # === VFI iteration ===
 
-def utility(c):
-    return np.log(c) if c > 0 else BIG_NEG
+
+def payoff(k_col, kp_row):
+    ''' 
+    payoff function 
+    input: k (current capital) with shape (n, 1), kp (next period capital) with shape (1, n)
+    output: payoff matrix with shape (n, n)
+
+    '''
+    c = k_col**alpha - kp_row
+
+    return np.where(c > 0, np.log(c), BIG_NEG)
+
+# pre-compute payoff matrix
+
+# k as column, kp as row -> shape (n, n)
+k_col = grid[:, None]                # shape (n,1)
+kp_row = grid[None, :]               # shape (1,n)
+util_mat = payoff(k_col, kp_row)
 
 import time
 
@@ -40,49 +56,17 @@ while error > tol:
     
     V = V_new.copy()
 
-    # k as column, kp as row -> shape (n, n)
-    k_col = grid[:, None]                # shape (n,1)
-    kp_row = grid[None, :]               # shape (1,n)
-
-    # consumption matrix: c[i,j] = k_i^alpha - kp_j
-    cons = k_col**alpha - kp_row        # shape (n,n)
-
-    # utility matrix; infeasible consumption -> BIG_NEG
-    util_mat = np.where(cons > 0, np.log(cons), BIG_NEG)  # shape (n,n)
-
     # value matrix: u(c) + beta * V(kp)
     val_mat = util_mat + beta * V[None, :]  # broadcast V over rows
 
     # for each k (each row) pick best kp (max over columns)
     best_idx = np.argmax(val_mat, axis=1)          # shape (n,)
     V_new = val_mat[np.arange(n), best_idx]        # max values, shape (n,)
-    g_num = grid[best_idx]                         # chosen kp values
+    g_num = grid[best_idx]                         # chosen kp valuesi
 
     error = np.max(np.abs(V_new - V)) / (1.0 + np.max(np.abs(V)))
+    print(f"VFI FD iteration error: {error:.10f}")
 
-# while error > tol:
-    
-#     V = V_new.copy()
-
-#     for i, k in enumerate(grid):
-
-#         best = -np.inf
-
-#         for j, kp in enumerate(grid):
-
-#             c = k ** alpha - kp
-#             val = utility(c) + beta * V[j]
-            
-
-#             if val > best:
-#                 best = val
-#                 best_idx = kp
-                
-
-#         V_new[i] = best
-#         g_num[i] = best_idx
-
-#     error = np.max(np.abs(V_new - V)) / (1.0 + np.max(np.abs(V)))
 
 end_time = time.time()
 
