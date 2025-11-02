@@ -1,121 +1,143 @@
 # ------------------------------------------------------------------------------
-# Howard Policy Improvement (non-vectorized)
-#   Outer loop: policy improvement (greedy update)
-#   Inner loop: policy evaluation (Gauss-Seidel)
+# Howard Policy Improvement in Value Function Iteration (VFI)
 # ------------------------------------------------------------------------------
 
 import numpy as np
 import time
 import matplotlib.pyplot as plt
 
-# === Parameters ===
+'''VFI with Full Discretization to solve the Ramsey Model '''
+
+
+# === parameters setting ===
+
 beta = 0.99
 alpha = 0.3
-tol = 1e-9        # tolerance for Bellman residual (outer loop)
-eval_tol = 1e-12  # tolerance for policy evaluation (inner loop)
-n = 500
-BIG_NEG = -1e16
+tol = 1e-9
+n = 2000 # number of grid points, or choose n = 500 for problem 1
 
-# === Capital grid ===
+
+# === full discretiazation ===
 a = alpha * beta
-k_ss = a ** (1.0 / (1.0 - alpha))         # steady state
-k_min, k_max = 0.2 * k_ss, 3.0 * k_ss
+k_ss = (a)**(1.0/(1.0 - alpha))
+k_min = 0.2 * k_ss
+k_max = 3.0 * k_ss
 grid = np.linspace(k_min, k_max, n)
 
-def utility(c: float) -> float:
-    """Log utility function with large negative penalty for infeasible consumption."""
-    return np.log(c) if c > 0 else BIG_NEG
 
-def howard_loops(grid, alpha, beta, tol, eval_tol,
-                 max_outer=10_000, max_eval=1_000_000):
-    n = len(grid)
-    V = np.zeros(n)
-    pol_idx = np.zeros(n, dtype=int)  # initial policy (will be overwritten)
-    outer = 0
+V = np.zeros(n)
+g_num = np.zeros(n)
+err_g = 1.0
+err_V = 1.0
 
-    t0 = time.perf_counter()
-    while outer < max_outer:
-        # 1) Policy improvement: find greedy policy w.r.t current V
-        pol_new = np.zeros(n, dtype=int)
-        for i in range(n):
-            k = grid[i]
-            k_alpha = k ** alpha
-            best_val = -np.inf
-            best_j = 0
-            for j in range(n):
-                kp = grid[j]
-                c = k_alpha - kp
-                val = utility(c) + beta * V[j]
-                if val > best_val:
-                    best_val = val
-                    best_j = j
-            pol_new[i] = best_j
 
-        # If the policy hasn't changed (after first iteration), stop
-        if outer > 0 and np.array_equal(pol_new, pol_idx):
-            break
-        pol_idx = pol_new
+BIG_NEG = -1e16
 
-        # 2) Policy evaluation: solve V = u(i,pol[i]) + beta * V[pol[i]]
-        #    using Gauss–Seidel iteration
-        it_eval = 0
-        while it_eval < max_eval:
-            V_old = V.copy()
-            for i in range(n):
-                j = pol_idx[i]
-                k = grid[i]
-                kp = grid[j]
-                c = k ** alpha - kp
-                V[i] = utility(c) + beta * V[j]
-            max_abs_V = max(abs(x) for x in V_old)
-            err_eval = max(abs(V[i] - V_old[i]) for i in range(n)) / (1.0 + max_abs_V)
-            it_eval += 1
-            if err_eval < eval_tol:
-                break
+# pre-compute payoff matrix
 
-        outer += 1
 
-        # 3) Check Bellman residual for convergence
-        max_resid = 0.0
-        for i in range(n):
-            k = grid[i]
-            k_alpha = k ** alpha
-            best = -np.inf
-            for j in range(n):
-                kp = grid[j]
-                c = k_alpha - kp
-                val = utility(c) + beta * V[j]
-                if val > best:
-                    best = val
-            resid = abs(best - V[i])
-            if resid > max_resid:
-                max_resid = resid
-        if max_resid < tol:
-            break
+def payoff(k_col, kp_row):
+    ''' 
+    payoff function 
+    input: k (current capital) with shape (n, 1), kp (next period capital) with shape (1, n)
+    output: payoff matrix with shape (n, n)
 
-    t1 = time.perf_counter()
-    return V.copy(), pol_idx.copy(), outer, (t1 - t0)
+    '''
+    c = k_col**alpha - kp_row
 
-# === Run both versions for comparison ===
-V_h, pol_h, it_outer, time_h = howard_loops(grid, alpha, beta, tol, eval_tol)
-print(f"Howard improvement:     outer loops={it_outer:>5d}, time={time_h:.4f} s")
+    return np.where(c > 0, np.log(c), BIG_NEG)
 
-# === Policy and value comparison ===
-g_num_h = grid[pol_h]
+# k as column, kp as row -> shape (n, n)
+k_col = grid[:, None]                # shape (n,1)
+kp_row = grid[None, :]               # shape (1,n)
+util_mat = payoff(k_col, kp_row)
+val_mat = util_mat + beta * V[None, :]  # value matrix: u(c) + beta * V(kp) broadcast V over rows
+best_idx = np.argmax(val_mat, axis=1)          # shape (n,)
+
+
+import time
+
+start_time = time.time()
+
+while err_g > tol:
+
+    V_new = val_mat[np.arange(n), best_idx]        # max values, shape (n,)
+    g_num = grid[best_idx]                         # chosen kp values
+    err_V = np.max(np.abs(V_new - V)) / (1.0 + np.max(np.abs(V)))
+
+    # Howard Policy Improvement step using the current policy function (best_idx)
+    while err_V > tol:
+
+        V = V_new.copy()
+
+        V_new = util_mat[np.arange(n), best_idx] + beta * V[best_idx]  # update V_new using current policy
+
+        err_V = np.max(np.abs(V_new - V)) / (1.0 + np.max(np.abs(V)))
+
+    # after Howard step, update policy function
+    val_mat = util_mat + beta * V_new[None, :]  # broadcast V_new over rows
+    best_idx = np.argmax(val_mat, axis=1)          # shape (n,)
+    err_g = np.max(np.abs(grid[best_idx] - g_num)) / (1.0 + np.max(np.abs(g_num)))
+    g_num = grid[best_idx]                         # chosen kp values
+
+
+end_time = time.time()
+
+
+print(f"VFI with Howard Improvement converged in {end_time - start_time:.4f} seconds")
+
+
+
+# === analytical value function ===
+
 
 B = alpha / (1 - alpha * beta)
-A = (np.log(1 - alpha * beta) + beta * B * np.log(alpha * beta)) / (1 - beta)
+
+A = ( np.log(1 - alpha * beta) + beta * B * np.log(alpha * beta) ) / (1 - beta)
+
+
+
 V_sol = A + B * np.log(grid)
 g_ana = a * (grid ** alpha)
 
-# === Plot results ===
+print("maximum absolute error in policy function:", np.max(np.abs(g_num - g_ana) / np.abs(g_ana)))
+print("mean error in policy function:", np.mean(np.abs(g_num - g_ana) / np.abs(g_ana)))
 
+# === visualization of numerical value function and analytical value function
 
-plt.subplot(1, 2, 2)
-plt.plot(grid, g_num_h,  '--', label="Howard g(k)")
-plt.plot(grid, g_ana,    ':', label="Analytical g(k)")
-plt.title("Policy Function Comparison")
-plt.xlabel("Capital k"); plt.ylabel("Next-period capital k'")
-plt.grid(True); plt.legend()
-plt.tight_layout()
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(8, 5))
+plt.plot(grid, V_new, label="Numerical V(k)", lw=2)
+plt.plot(grid, V_sol, '--', label="Analytical V(k)", lw=2)
+plt.xlabel("Capital")
+plt.ylabel("Value Function")
+plt.title("Value Function: Numerical vs Analytical")
+plt.grid(True)
+plt.legend()  
 plt.show()
+
+
+
+plt.figure(figsize=(8, 5))
+plt.plot(grid, g_num, label="Numerical g(k)", lw=2)
+plt.plot(grid, g_ana, '--', label="Analytical g(k)", lw=2)
+plt.xlabel("Capital k")
+plt.ylabel("Next period k")
+plt.title("Policy function comparison")
+plt.grid(True)
+plt.legend()  
+plt.show()
+
+
+
+# === plot error distribution in policy ===
+rel_err = np.abs(g_num - g_ana) / np.abs(g_ana)
+plt.figure(figsize=(8, 5))
+plt.plot(grid, rel_err, lw=2)
+plt.xlabel("Capital k")
+plt.ylabel("relative error")
+plt.title("Policy function relative error (VFI(FD) vs analytical)")
+plt.grid(True)
+plt.show()
+
