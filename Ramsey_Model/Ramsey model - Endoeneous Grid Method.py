@@ -15,10 +15,10 @@ grid_style = 'linear'   # 'linear' or 'log'
 a = alpha * beta
 k_ss = (a)**(1.0/(1.0 - alpha))
 k_min = 0.2 * k_ss
-k_max = 1.0 * k_ss
+k_max = 3.0 * k_ss
 
 if grid_style == 'linear':
-    grid_k = np.linspace(k_min, k_max, n)            # k-grid for reporting/interpolation
+    grid_k = np.linspace(k_min, k_max, n)            # grid_k is exogeneous grid
 elif grid_style == 'log':
     grid_k = np.exp(np.linspace(np.log(k_min), np.log(k_max), n))
 
@@ -38,7 +38,7 @@ def k_policy_analytical(k):
 # We represent the policy function as g(x), where x = f(k), then interpolate it to x=f(k_grid)
 # Initial guess: use analytical solution or a moderate linear savings rate
 g_old_on_k = 0.3 * f(grid_k)                 # your original initialization
-# More stable initialization can also use: g_old_on_k = k_policy_analytical(grid_k)
+
 
 # To construct g(x), we need a k' grid; here use the same range and style as k
 if grid_style == 'linear':
@@ -48,7 +48,7 @@ else:
 
 # Convergence criterion: compare g_new(k) with g_old(k) sup-norm on the same k set
 def sup_norm_rel(new, old):
-    denom = np.maximum(1e-12, np.max(np.abs(old)))
+    denom = np.max(np.abs(old))
     return np.max(np.abs(new - old)) / denom
 
 err = 1.0
@@ -59,37 +59,35 @@ while err > tol:
     it += 1
 
     # Step 1: use old policy g_old(k) to construct g_old(k') for evaluation on k' grid
-    # Note: here g_old_on_k is defined on k-grid, we need its values on k' grid: g_old(k')
+    # Note: here g_old_on_k is defined on k-grid, we need its values on k' grid: g_old(k') by interpolation
     g_old_on_kp = np.interp(grid_kp, grid_k, g_old_on_k)
 
     # Step 2: for each k' compute c_next, c_today, x_today = k' + c_today
     xs = np.empty_like(grid_kp)   # x_today
     kps = np.empty_like(grid_kp)  # k'
+    grid_endog = np.empty_like(grid_kp)  # placeholder for endogenous grid
+
     for i, kp in enumerate(grid_kp):
+
         gp = g_old_on_kp[i]                 # k'' = g_old(k')
         c_next = f(kp) - gp                 # c_{t+1} = f(k') - g(k')
-        # Feasibility safeguard: avoid numerical errors causing c_next <= 0
-        if c_next <= 0:
-            c_next = 1e-14
         rhs = beta * uprime(c_next) * fprime(kp)   # β * u'(c_{t+1}) * f'(k')
-        # Similar safeguard: rhs is positive and nonzero
-        rhs = max(rhs, 1e-14)
         c_today = uprime_inv(rhs)                  # c_t = (u')^{-1}(rhs)
         xs[i] = kp + c_today                       # x_today = k' + c_t
         kps[i] = kp
+    # Now we have pairs of (x_today, k') = (xs, kps)
+        grid_endog[i] = xs[i] ** (1.0 / alpha)   # corresponding k for x_today
 
-    # Step 3: sort (x, k') and interpolate to get k' = g(x)
-    sort_idx = np.argsort(xs)
-    xs_sorted = xs[sort_idx]
-    kps_sorted = kps[sort_idx]
 
-    # To evaluate g(k) on the k grid, we first take x = f(k_grid) as the argument
-    x_on_k = f(grid_k)
+    # # To evaluate g(k) on the k grid, we first take x = f(k_grid) as the argument
+    # x_on_k = f(grid_k)
 
-    # Interpolation: g_new_on_k = g(x_on_k)
-    # Note boundary extrapolation strategy: clamp to boundary to avoid NaN
-    g_new_on_k = np.interp(x_on_k, xs_sorted, kps_sorted,
-                           left=kps_sorted[0], right=kps_sorted[-1])
+    g_new_on_k = np.interp( grid_k, grid_endog, kps)
+
+    # # Interpolation: g_new_on_k = g(x_on_k)
+    # # Note boundary extrapolation strategy: clamp to boundary to avoid NaN
+    # g_new_on_k = np.interp(x_on_k, xs, kps,
+    #                        left=kps[0], right=kps[-1])
 
     err = sup_norm_rel(g_new_on_k, g_old_on_k)
     g_old_on_k = g_new_on_k.copy()

@@ -2,7 +2,6 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.optimize import root_scalar
 
 
 # === parameters setting ===
@@ -17,7 +16,7 @@ damp_factor = 0.2   # for conservative updating
 a = alpha * beta
 k_ss = (a)**(1.0/(1.0 - alpha))
 k_min = 0.2 * k_ss
-k_max = 1.0 * k_ss
+k_max = 3.0 * k_ss
 grid = np.linspace(k_min, k_max, n)
 
 
@@ -25,20 +24,6 @@ grid = np.linspace(k_min, k_max, n)
 def f(k):      return k**alpha
 def fprime(k): return alpha * k**(alpha - 1.0)
 def uprime(c): return 1.0 / c
-
-def euler_residual(k, kp, g_prev):
-    """F(k,k') = 1/(f(k)-k') - beta*f'(k')/(f(k')-g_prev(k'))"""
-    '''k: current capital grid point
-       kp: next period capital
-       g_prev: previous policy function g(k)'''
-    c = f(k) - kp
-    if c <= 0:      
-        return np.inf
-    gp = np.interp(k, grid, g_prev)      # g_prev(k)
-    cp = f(gp) - np.interp(gp, grid, g_prev)
-    if cp <= 0:
-        return -np.inf
-    return uprime(c) - beta * uprime(cp) * fprime(gp)
 
 
 # === analytical solution ===
@@ -66,38 +51,11 @@ iter_times = 0
 while flag:
     
     k_old = k_new.copy()
-    k_old_interp = lambda x: np.interp(x, grid, k_old)
     iter_times += 1
 
     for i, k_val in enumerate(grid):
-        F = lambda x: euler_residual(k_val, x, k_old)   # use F consistently
-        left, right = k_min, k_max
-        f_left, f_right = F(left), F(right)
+        k_new[i] = f(k_val) - ( f(k_old[i]) - np.interp(k_old[i], grid, k_old)  ) / (beta * fprime(k_old[i]))  # initial guess
 
-        if f_left * f_right <= 0:
-            try:
-                sol = root_scalar(F, bracket=[left, right], method='bisect')
-                k_new[i] = sol.root
-            except ValueError:
-                # rare: numerical issues at endpoints -> fallback
-                k_new[i] = k_policy_analytical(k_val)
-        else:
-            # scan interval for a sub-bracket with a sign change
-            xs = np.linspace(left, right, 200)
-            found = False
-            for x0, x1 in zip(xs[:-1], xs[1:]):
-                if F(x0) * F(x1) <= 0:
-                    try:
-                        sol = root_scalar(F, bracket=[x0, x1], method='bisect')
-                        k_new[i] = sol.root
-                        found = True
-                        break
-                    except ValueError:
-                        # if bisect fails here, continue scanning
-                        pass
-            if not found:
-                # no sign change found — use analytical policy as safe fallback
-                k_new[i] = k_policy_analytical(k_val)
     k_new = damp_factor * k_new + (1 - damp_factor) * k_old  # conservative dampening
     err = np.max(np.abs(k_new - k_old)) / np.max(np.abs(k_old))
     print(f'Current error: {err:.2e}')
